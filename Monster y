@@ -1,0 +1,165 @@
+import os
+
+root = "MonsterStudy_v2_4"
+
+folders = [ ".github/workflows", "app/src/main/java/com/monster/study", "app/src/main/assets", ]
+
+for f in folders: os.makedirs(os.path.join(root, f), exist_ok=True)
+
+-------------------- MonsterActivity.kt --------------------
+
+monster_kotlin_code = """ package com.monster.study
+
+import android.app.* import android.content.* import android.os.* import android.speech.tts.TextToSpeech import android.webkit.JavascriptInterface import android.webkit.WebView import android.webkit.WebViewClient import android.widget.Toast import androidx.appcompat.app.AppCompatActivity import java.io.File import java.io.FileInputStream import java.util.* import org.apache.pdfbox.pdmodel.PDDocument import org.apache.pdfbox.text.PDFTextStripper import org.apache.poi.xwpf.usermodel.XWPFDocument
+
+class MonsterActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+
+private lateinit var webView: WebView
+private lateinit var tts: TextToSpeech
+private val languages = mutableListOf(Locale.US)
+private var currentLangIndex = 0
+
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+
+    tts = TextToSpeech(this, this)
+
+    webView = WebView(this)
+    webView.settings.javaScriptEnabled = true
+    webView.addJavascriptInterface(MonsterBridge(), "Monster")
+    webView.webViewClient = WebViewClient()
+    webView.loadUrl("file:///android_asset/index.html")
+
+    setContentView(webView)
+}
+
+override fun onInit(status: Int) {
+    if (status == TextToSpeech.SUCCESS) tts.language = Locale.US
+}
+
+inner class MonsterBridge {
+
+    @JavascriptInterface
+    fun speak(text: String) {
+        tts.language = languages[currentLangIndex]
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        currentLangIndex = (currentLangIndex + 1) % languages.size
+    }
+
+    @JavascriptInterface
+    fun downloadVoice(langCode: String) {
+        val locale = Locale.forLanguageTag(langCode)
+        val result = tts.setLanguage(locale)
+        if(result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED){
+            val intent = Intent()
+            intent.action = TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA
+            startActivity(intent)
+        } else {
+            if(!languages.contains(locale)) languages.add(locale)
+            Toast.makeText(this@MonsterActivity,"Language $langCode ready",Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @JavascriptInterface
+    fun command(cmd: String) {
+        when {
+            cmd.contains("pause", true) -> tts.stop()
+            cmd.contains("language", true) -> {
+                currentLangIndex = (currentLangIndex + 1) % languages.size
+                tts.language = languages[currentLangIndex]
+                Toast.makeText(this@MonsterActivity,"Language switched",Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun scheduleBreak(minutes: Int) {
+        val intent = Intent(this@MonsterActivity, BreakReceiver::class.java)
+        val pending = PendingIntent.getBroadcast(
+            this@MonsterActivity, 0, intent, PendingIntent.FLAG_IMMUTABLE
+        )
+        val am = getSystemService(ALARM_SERVICE) as AlarmManager
+        am.set(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + minutes * 60000,
+            pending
+        )
+    }
+}
+
+class BreakReceiver: BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        Toast.makeText(context,"Time for a break!",Toast.LENGTH_LONG).show()
+    }
+}
+
+} """
+
+-------------------- index.html --------------------
+
+index_html = """
+
+<!DOCTYPE html><html>
+<head>
+<meta charset="UTF-8">
+<title>Monster v2.4 Dashboard</title>
+</head>
+<body>
+<h2>Monster v2.4 Dashboard</h2><input id="query" placeholder="Search Wikipedia">
+<button onclick="searchWiki()">Wikipedia</button>
+<div id="wikiResult"></div><textarea id="aiPrompt" placeholder="Ask Monster AI"></textarea><button onclick="askAI()">Ask AI</button>
+
+<div id="aiAnswer"></div><button onclick="read()">Read Aloud</button> <button onclick="highlightSelectionOnly()">Highlight Selection</button> <button onclick="highlightWord()">Highlight Word</button> <button onclick="highlightLine()">Highlight Line</button> <button onclick="recap()">Recap</button> <button onclick="cloze()">Cloze</button> <button onclick="mcq()">MCQ</button> <button onclick="listen()">Voice Cmd</button> <button onclick="saveProgress()">Save Progress</button>
+
+<select id="langSelect">
+  <option value="en-US">English (US)</option>
+  <option value="en-GB">English (UK)</option>
+  <option value="fr-FR">French</option>
+  <option value="es-ES">Spanish</option>
+  <option value="de-DE">German</option>
+</select>
+<button onclick="downloadLang()">Download Voice</button><script>
+let highlightColor="yellow";
+function highlightSelection(scope="selection"){ /* word,line,selection logic */ }
+function highlightWord(){highlightSelection("word");}
+function highlightLine(){highlightSelection("line");}
+function highlightSelectionOnly(){highlightSelection("selection");}
+function read(){ const t=window.getSelection().toString()||document.body.innerText; Monster.speak(t); }
+function downloadLang(){ const lang=document.getElementById("langSelect").value; Monster.downloadVoice(lang); alert("Requested download for "+lang); }
+function recap(){alert(document.body.innerText.split('.').slice(0,5).join('.'));}
+function cloze(){let w=document.body.innerText.split(' '); let i=Math.floor(Math.random()*w.length); w[i]='____'; alert(w.slice(0,50).join(' '));}
+function mcq(){alert("Q: Sample?\nA) 1\nB) 2\nC) 3\nD) 4");}
+function searchWiki(){ const q=document.getElementById('query').value; fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`).then(r=>r.json()).then(d=>{document.getElementById('wikiResult').innerHTML=`<h3>${d.title}</h3><p>${d.extract}</p>`; Monster.speak(d.extract);}).catch(()=>alert('Not found')); }
+function askAI(){ alert('AI offline');}
+function listen(){ alert('Voice command');}
+function saveProgress(){ localStorage.setItem('monster_notes',document.body.innerHTML); alert('Saved');}
+function loadProgress(){ const d=localStorage.getItem('monster_notes'); if(d) document.body.innerHTML=d;}
+window.onload=loadProgress;
+</script></body>
+</html>
+"""-------------------- Manifest --------------------
+
+manifest = """<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+package="com.monster.study"> <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/> <uses-permission android:name="android.permission.RECORD_AUDIO"/> <application
+android:allowBackup="true"
+android:label="Monster"
+android:supportsRtl="true"
+android:theme="@style/Theme.AppCompat.Light.NoActionBar"> <activity android:name=".MonsterActivity" android:exported="true"> <intent-filter> <action android:name="android.intent.action.MAIN"/> <category android:name="android.intent.category.LAUNCHER"/> </intent-filter> </activity> </application> </manifest>"""
+
+-------------------- Gradle --------------------
+
+root_build_gradle = """buildscript { repositories { google(); mavenCentral() } dependencies { classpath "com.android.tools.build:gradle:8.2.0" } } allprojects { repositories { google(); mavenCentral() } }"""
+
+settings_gradle = """rootProject.name = "MonsterStudy_v2_4" include ':app'"""
+
+app_build_gradle = """plugins { id 'com.android.application' } android { namespace 'com.monster.study' compileSdk 34 defaultConfig { applicationId "com.monster.study" minSdk 26 targetSdk 34 versionCode 4 versionName "2.4" } buildTypes { release { minifyEnabled false } } } dependencies { implementation "androidx.appcompat:appcompat:1.7.0" implementation "androidx.recyclerview:recyclerview:1.3.0" } """
+
+-------------------- GitHub Workflow --------------------
+
+workflow = """name: Build Monster APK on: push: branches: ["main"] workflow_dispatch: jobs: build: runs-on: ubuntu-latest steps: - name: Checkout Repository uses: actions/checkout@v4 - name: Set up JDK uses: actions/setup-java@v4 with: distribution: temurin java-version: 17 - name: Set up Android SDK uses: android-actions/setup-android@v3 - name: Grant execute permission for Gradle run: chmod +x ./gradlew - name: Build Debug APK run: ./gradlew assembleDebug - name: Upload APK uses: actions/upload-artifact@v4 with: name: Monster-v2.4-APK path: app/build/outputs/apk/debug/app-debug.apk """
+
+files = { "app/src/main/java/com/monster/study/MonsterActivity.kt": monster_kotlin_code, "app/src/main/assets/index.html": index_html, "app/src/main/AndroidManifest.xml": manifest, "build.gradle": root_build_gradle, "settings.gradle": settings_gradle, "app/build.gradle": app_build_gradle, ".github/workflows/android-build.yml": workflow, }
+
+for path, content in files.items(): full_path = os.path.join(root, path) os.makedirs(os.path.dirname(full_path), exist_ok=True) with open(full_path, "w", encoding="utf-8") as f: f.write(content)
+
+print(f"MonsterStudy v2.4 fully generated in folder '{root}'. Push to GitHub to build APK!")
